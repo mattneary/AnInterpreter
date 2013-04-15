@@ -1,3 +1,4 @@
+var fs = require('fs');
 var identity = function(x) {
 	return x;
 };
@@ -105,7 +106,9 @@ var interpret = function(x, env) {
 	}
 };
 
-var trans = translate('(~R∊R∘.×R)/R←1↓⍳7'),
-	pars = parse(trans),
-	prog = interpret(pars, new library({}));
-console.log(prog);
+fs.readFile(__dirname + '/example.apl', function(err, data) {
+	var trans = translate(data+''),
+		pars = parse(trans),
+		prog = interpret(pars, new library({}));
+	console.log(prog);
+});
