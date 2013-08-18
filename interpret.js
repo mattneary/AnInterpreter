@@ -1,7 +1,31 @@
 var fs = require('fs');
+
+// The syntax definition - parser.
 var number = "[0-9]+",
 	operator = "([*+-\\/\\^•∊~↓⍳←×])",
 	variable = "[a-zA-Z_]";
+	// TODO: make variable allow for whitespace in between,
+	//       i.e., for list shorthand
+var parse = function(str) {	
+	var exprs = [
+		[just(number), parseInt],
+		[leading(or(number, variable)+operator), parseOp],
+		[leading(operator), parseMonadicOp],
+		[/^[(]/, parseParen],
+		[/^/, identity]
+	];
+	var matched = false,
+		parse;
+	exprs.forEach(function(expr) {
+		if( expr[0].test(str) && !matched ) {
+			matched = true;
+			parse = expr[1](str);
+		}
+	});
+	return matched && parse;
+};
+	
+// The parser dependencies.	
 var identity = function(x){return x;};
 var parseParen = function(str) {
 	var nested = 0,
@@ -58,24 +82,8 @@ var leading = function(pattern) {
 var or = function(a, b) {
 	return "("+a+"|"+b+")"
 };
-var parse = function(str) {	
-	var exprs = [
-		[just(number), parseInt],
-		[leading(or(number, variable)+operator), parseOp],
-		[leading(operator), parseMonadicOp],
-		[/^[(]/, parseParen],
-		[/^/, identity]
-	];
-	var matched = false,
-		parse;
-	exprs.forEach(function(expr) {
-		if( expr[0].test(str) && !matched ) {
-			matched = true;
-			parse = expr[1](str);
-		}
-	});
-	return matched && parse;
-};
+
+// The evaluator
 var eval = function(expr, env) {
 	if( typeof expr == "string" ) {
 		return typeof env[expr] == 'undefined' ? expr : env[expr];
@@ -96,7 +104,7 @@ var evalparse = function(expr, env) {
 	return resp;
 };
 
-
+// The Function Library
 var deepContains = function(set, x) {
 	if( set[0].map ) {
 		return set.map(function(s) {
