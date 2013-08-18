@@ -1,119 +1,165 @@
 var fs = require('fs');
-var identity = function(x) {
-	return x;
-};
-var binary_parse = function(expr, fold) {
-	if( expr.match(/\)λ([^λ]+)λ([^λ\s]+)?\)?$/) ) {
-		// parenthetical
-		var parts = expr.match(/([\s\S]+)?\(([^)]+)\)λ([^λ]+)λ([^λ\s]+)?\)?$/);
-		var eval = [parts[3], parse(parts[2]), parts[4]?parse(parts[4]):fold];
-		return parts[1] ? parse(parts[1], eval) : eval;
+var number = "[0-9]+",
+	operator = "([*+-\\/\\^•∊~↓⍳←×])",
+	variable = "[a-zA-Z_]";
+var identity = function(x){return x;};
+var parseParen = function(str) {
+	var nested = 0,
+		paren = "",
+		rest = "",
+		matched = false;
+	for( var i = 0; i < str.length; i++ ) {
+		var read = str[i];
+		if( read == '(' && !matched ) {
+			nested++;
+			if( nested == 1 ) {
+				paren = "";
+			} else {
+				paren += read;
+			}
+		} else if( read == ')' && !matched ) {
+			nested--;
+			if( nested == 0 ) {
+				matched = true; 
+			} else {
+				paren += read;
+			}
+		} else if(matched) {
+			rest += read;
+		} else {
+			paren += read;
+		}
+	}
+	if( rest ) {
+		var parsed = parse('_'+rest);									
+		parsed.splice(1, 1, parse(paren));		
+		return parsed;
 	} else {
-		var parts = expr.match(/([\s\S]+)?([^λ]+)λ([^λ]+)λ([^λ\s]+)?\)?$/);
-		var eval = [parts[3], parse(parts[2]), parts[4]?parse(parts[4]):fold];
-		return parts[1] ? parse(parts[1], eval) : eval;
+		return parse(paren);
 	}
 };
-var unary_parse = function(expr, fold) {
-	var parts = expr.match(/([\s\S]+)?Λ([^Λ]+)Λ([^\sλΛ]+)?$/);	
-	var eval = [parts[2], parts[3]?parse(parts[3]):fold];
-	return parts[1] ? parse(parts[1], eval) : eval;
+var parseMonadicOp = function(str) {
+	var op = str[0],
+		rest = str.substr(1);
+	return [op, parse(rest)];
 };
-var clean = function(expr) {
-	return expr[0] == '(' ? expr.substr(1) : expr.substr(0, expr.length - 1);
+var parseOp = function(str) {
+	var first = str.split(new RegExp(operator))[0],
+		op = str.substr(first.length, 1),
+		rest = str.substr(first.length + 1);
+	return [op, parse(first), parse(rest)];
 };
-var parse = function(expr, fold) {
-	/*
-		expr = <expr>λ<fn>λ<expr>
-				| Λ<var>Λ<expr>
-				| <val>
-		val = [0-9]+ | '[^']+'
-	*/
-	var rules = [
-		[/Λ([^\sλΛ]+)?$/, unary_parse],
-		[/λ([^\sλΛ]+)?$/, binary_parse],		
-		[/(\([^)]+|[^(]+\))$/, clean],
-		[/$/, identity]
+var just = function(pattern) {
+	return new RegExp("^"+pattern+"$");
+};
+var leading = function(pattern) {
+	return new RegExp("^"+pattern);
+};
+var or = function(a, b) {
+	return "("+a+"|"+b+")"
+};
+var parse = function(str) {	
+	var exprs = [
+		[just(number), parseInt],
+		[leading(or(number, variable)+operator), parseOp],
+		[leading(operator), parseMonadicOp],
+		[/^[(]/, parseParen],
+		[/^/, identity]
 	];
-	
-	// parse expression with matching rule
-	var parsed;
-	rules.forEach(function(rule) {
-		if( rule[0].test(expr) && !parsed ) {
-			parsed = rule[1](expr, fold);
+	var matched = false,
+		parse;
+	exprs.forEach(function(expr) {
+		if( expr[0].test(str) && !matched ) {
+			matched = true;
+			parse = expr[1](str);
 		}
 	});
-
-	return parsed;
+	return matched && parse;
 };
-var translate = function(APL) {
-	var binary = '∊,∘.×,/,←,↓'.split(','),
-		unary = '!,~,⍳'.split(',');
-	return APL.replace(new RegExp('('+binary.join('|')+')', 'g'), 'λ$1λ').replace(new RegExp('('+unary.join('|')+')', 'g'), 'Λ$1Λ');
-};
-
-var distribute = function(cb, obj, x) {
-	return (obj && obj.map) ? obj.map(function(a){return cb(a, x);}) : cb(obj, x);
-};
-var library = function() {
-	this['~'] = function(vect) {
-		return distribute(function(x) {
-			return !x;
-		}, vect);
-	},
-	this['⍳'] = function(vect) {
-		return distribute(function(x) {
-			return Array(x).join(0).split(0).map(function(_, n){return n+1;});
-		}, vect);
-	},
-	this['!'] = function(vect) {
-		return distribute(function(x) {
-			return this['⍳'](vect).reduce(function(a,b){return a*b;});
-		}.bind(this), vect);
-	};
-	this['∊'] = function(vectA, vectB) {
-		return distribute(function(a) {
-			return vectB && vectB.indexOf(a) != -1;
-		}, vectA);
-	},
-	this['∘.×'] = function(vectA, vectB) {
-		return vectA && vectA.map(function(a) {
-			return vectB && vectB.map(function(b) {
-				return a*b;
-			});
-		}).reduce(function(a, b) {
-			return a.concat(b);
-		});
-	},
-	this['/'] = function(vectA, vectB) {
-		return vectB && vectB.filter(function(_, n) {
-			return vectA[n];
-		});
-	},
-	this['←'] = function(name, value) {		
-		this[name] = value;
-		return value;
-	},
-	this['↓'] = function(count, vect) {
-		return vect.slice(count);
-	};
-};
-var interpret = function(x, env) {
-	if( typeof x == 'string' ) {
-		if( x.match(/^[0-9]+$/) ) {
-			return parseInt(x);
+var eval = function(expr, env) {
+	if( typeof expr == "string" ) {
+		return typeof env[expr] == 'undefined' ? expr : env[expr];
+	} else if( typeof expr == 'number' ) {
+		return expr;
+	} else if( just(operator).test(expr[0]) ) {
+		if( expr.length == 2 ) {
+			return env.monadic[expr[0]](eval(expr[1], env), env);
 		} else {
-			return env[x] || x;
+			var b = eval(expr[2], env),
+				a = eval(expr[1], env);
+			return env.dyadic[expr[0]](a, b, env);
 		}
-	} else {
-		var exprs = x && x.reverse().map(function(expr) { return interpret(expr, env); });
-		return exprs && exprs.pop().apply(env, exprs.reverse());
+	}
+};
+var evalparse = function(expr, env) {
+	var resp = eval(parse(expr), env);	
+	return resp;
+};
+
+
+var deepContains = function(set, x) {
+	if( set[0].map ) {
+		return set.map(function(s) {
+			return deepContains(s, x)
+		}).reduce(function(a,b) {
+			return a||b;
+		});
+	}
+	return set.indexOf(x) != -1;
+};
+var prelude = {
+	dyadic: {
+		"+": function(a,b){return a+b},
+		"*": function(a,b){return a*b},
+		"^": function(a,b){return Math.pow(a, b);},
+		"•": function(x,y) { return [Math.sin, Math.cos, Math.tan][x](y); },
+		"-": function(a,b) { return a-b; },
+		"↓": function(a,b) { return b.slice(a); },
+		"←": function(name, val, env) {
+			env[name] = val; 
+			return val; 
+		},
+		"/": function(as,bs) { 
+			return bs.filter(function(b, index) {
+				return as[index];
+			});
+		},
+		"×": function(as,bs) {
+			return as.map(function(a) {
+				return bs.map(function(b) {
+					return a*b;
+				});
+			});
+		},
+		"∊": function(a,b) {
+			var op = this["∊"].bind(this);
+			if( a.map ) {
+				return a.map(function(a) {
+					return op(a,b);
+				});
+			}			
+			return deepContains(b, a) ? 1 : 0;
+		}
+	},
+	monadic: {
+		"-": function(a) { return -a; },
+		"⍳": function(x) {
+			return Array(x).join(0).split(0).map(function(_, index) {
+				return index+1;
+			}) 
+		},
+		"~": function(x) {
+			var op = this["~"].bind(this);
+			if( x.map ) {
+				return x.map(function(x) {
+					return op(x);
+				});
+			}
+			return x == 0 ? 1 : 0;
+		}
 	}
 };
 
 fs.readFile(__dirname + '/example.apl', function(err, data) {
-	var trans = translate(data+''),
-		pars = parse(trans),
-		prog = interpret(pars, new library());
-	console.log(prog);
+	console.log(evalparse(data+"", prelude));
 });
