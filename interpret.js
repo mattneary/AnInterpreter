@@ -48,14 +48,14 @@ var parse = function(expr, fold) {
 };
 var translate = function(APL) {
 	var binary = '∊,∘.×,/,←,↓'.split(','),
-		unary = '~,⍳'.split(',');
+		unary = '!,~,⍳'.split(',');
 	return APL.replace(new RegExp('('+binary.join('|')+')', 'g'), 'λ$1λ').replace(new RegExp('('+unary.join('|')+')', 'g'), 'Λ$1Λ');
 };
 
 var distribute = function(cb, obj, x) {
 	return (obj && obj.map) ? obj.map(function(a){return cb(a, x);}) : cb(obj, x);
 };
-var library = function(env) {
+var library = function() {
 	this['~'] = function(vect) {
 		return distribute(function(x) {
 			return !x;
@@ -66,6 +66,11 @@ var library = function(env) {
 			return Array(x).join(0).split(0).map(function(_, n){return n+1;});
 		}, vect);
 	},
+	this['!'] = function(vect) {
+		return distribute(function(x) {
+			return this['⍳'](vect).reduce(function(a,b){return a*b;});
+		}.bind(this), vect);
+	};
 	this['∊'] = function(vectA, vectB) {
 		return distribute(function(a) {
 			return vectB && vectB.indexOf(a) != -1;
@@ -109,6 +114,6 @@ var interpret = function(x, env) {
 fs.readFile(__dirname + '/example.apl', function(err, data) {
 	var trans = translate(data+''),
 		pars = parse(trans),
-		prog = interpret(pars, new library({}));
+		prog = interpret(pars, new library());
 	console.log(prog);
 });
