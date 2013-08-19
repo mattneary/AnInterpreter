@@ -2,16 +2,24 @@ var fs = require('fs');
 
 // The syntax definition - parser.
 var number = "[0-9]+",
-	operator = "([*+-\\/\\^•∊~↓⍳←×])",
+	operator = "([*+-\\/\\^•∊~↓⍳←∘×])",
+	hoo = "[\\.]",
 	variable = "[a-zA-Z_]";
 	// TODO: make variable allow for whitespace in between,
-	//       i.e., for list shorthand
-var parse = function(str) {	
+	//       i.e., list shorthand
+var parse = function(str) {
 	var exprs = [
+		// number literal
 		[just(number), parseInt],
+		// dyadic operations
+		[leading(or(number, variable)+optional(operator)+hoo+operator), parseCompoundOp],
 		[leading(or(number, variable)+operator), parseOp],
+		// monadic operations
+		[leading(optional(operator)+hoo+operator), parseMonadicCompoundOp],
 		[leading(operator), parseMonadicOp],
+		// parenthetical
 		[/^[(]/, parseParen],
+		// string literal (variable access)
 		[/^/, identity]
 	];
 	var matched = false,
@@ -67,6 +75,27 @@ var parseMonadicOp = function(str) {
 		rest = str.substr(1);
 	return [op, parse(rest)];
 };
+var parseCompoundOp = function(str) {
+	var parts = str.split(new RegExp(or(operator, hoo)+"+")),
+		first = parts[0],
+		op = str.match(new RegExp(or(operator, hoo)+"+"))[0],
+		rest = str.substr(first.length + op.length);
+	if( op.length == 3 ) {
+		return [[op[1], op[0], op[2]], parse(first), parse(rest)];
+	} else {
+		return [[op[0], op[1]], parse(first), parse(rest)];
+	}
+};
+var parseMonadicCompoundOp = function(str) {
+	var op = str.match(leading(or(operator, hoo)+"+"))[0],
+		rest = str.substr(op.length);
+	if( op.length == 3 ) {
+		return [[op[1], op[0], op[2]], parse(rest)];
+	} else {
+		return [[op[0], op[1]], parse(rest)];
+	}
+};
+
 var parseOp = function(str) {
 	var first = str.split(new RegExp(operator))[0],
 		op = str.substr(first.length, 1),
@@ -80,8 +109,14 @@ var leading = function(pattern) {
 	return new RegExp("^"+pattern);
 };
 var or = function(a, b) {
-	return "("+a+"|"+b+")"
+	return "("+a+"|"+b+")";
 };
+var repeat = function(pattern, n) {
+	return pattern+"{"+n+"}"
+};
+var optional = function(pattern) {
+	return pattern+"?";
+}
 
 // The evaluator
 var eval = function(expr, env) {
@@ -89,6 +124,14 @@ var eval = function(expr, env) {
 		return typeof env[expr] == 'undefined' ? expr : env[expr];
 	} else if( typeof expr == 'number' ) {
 		return expr;
+	} else if( expr[0].map ) {
+		if( expr.length == 2 ) {
+			return env.monadic[expr[0]](eval(expr[1], env), env);
+		} else {
+			var b = eval(expr[2], env),
+				a = eval(expr[1], env);
+			return env.dyadic[expr[0]](a, b, env);
+		}
 	} else if( just(operator).test(expr[0]) ) {
 		if( expr.length == 2 ) {
 			return env.monadic[expr[0]](eval(expr[1], env), env);
@@ -169,5 +212,6 @@ var prelude = {
 };
 
 fs.readFile(__dirname + '/example.apl', function(err, data) {
-	console.log(evalparse(data+"", prelude));
+	console.log(JSON.stringify(parse("(~R∊R∘.×R)/R←1↓⍳R")));
+//	console.log(evalparse(data+"", prelude));
 });
